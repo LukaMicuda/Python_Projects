@@ -1,0 +1,123 @@
+flutter pub add encrypt
+flutter pub add web_socket_channel
+
+
+import 'package:flutter/material.dart';
+import 'package:web_socket_channel/io.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:encrypt/encrypt.dart' as encrypt;
+import 'dart:convert';
+
+void main() {
+  runApp(MyApp());
+}
+
+// Define a shared AES encryption key and initialization vector (IV)
+final key = encrypt.Key.fromUtf8('my32lengthsupersecretnooneknows1'); // 32 bytes
+final iv = encrypt.IV.fromLength(16); // 16 bytes
+
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Local WiFi Chat',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+      ),
+      home: ChatScreen(),
+    );
+  }
+}
+
+class ChatScreen extends StatefulWidget {
+  @override
+  _ChatScreenState createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends State<ChatScreen> {
+  final TextEditingController _controller = TextEditingController();
+  final WebSocketChannel channel = IOWebSocketChannel.connect('ws://192.168.1.100:8765'); // Local server IP
+  List<String> messages = [];
+
+  // Encrypt the message
+  String encryptMessage(String message) {
+    final encrypter = encrypt.Encrypter(encrypt.AES(key));
+    final encrypted = encrypter.encrypt(message, iv: iv);
+    return encrypted.base64;
+  }
+
+  // Decrypt the message
+  String decryptMessage(String encryptedMessage) {
+    final encrypter = encrypt.Encrypter(encrypt.AES(key));
+    final decrypted = encrypter.decrypt64(encryptedMessage, iv: iv);
+    return decrypted;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    channel.stream.listen((data) {
+      final decryptedMessage = decryptMessage(data);
+      setState(() {
+        messages.add(decryptedMessage);
+      });
+    });
+  }
+
+  void _sendMessage() {
+    if (_controller.text.isNotEmpty) {
+      final encryptedMessage = encryptMessage(_controller.text);
+      channel.sink.add(encryptedMessage);
+      setState(() {
+        messages.add("You: ${_controller.text}");
+        _controller.clear();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    channel.sink.close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Encrypted Chat over WiFi'),
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: ListView.builder(
+              itemCount: messages.length,
+              itemBuilder: (context, index) {
+                return ListTile(
+                  title: Text(messages[index]),
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _controller,
+                    decoration: InputDecoration(hintText: 'Enter your message'),
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.send),
+                  onPressed: _sendMessage,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
